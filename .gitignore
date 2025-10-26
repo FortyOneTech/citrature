@@ -72,7 +72,7 @@ celerybeat-schedule
 celerybeat.pid
 
 # Docker
-# .dockerignore
+.dockerignore
 
 # Environment files
 .env
