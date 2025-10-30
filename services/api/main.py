@@ -1,19 +1,28 @@
 """FastAPI application for Citrature platform."""
 
 import logging
+import sys
+import os
+
+# Add parent directory to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from citrature.config import get_settings
-from citrature.api import auth, collections, ingest, graph, chat, search
-from citrature.database import engine, Base
+from shared.config import initialize_settings
+from services.api.routes import auth, collections, ingest, graph, chat, search
+from shared.database import engine, Base
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Get settings
-settings = get_settings()
+# Initialize and validate settings at startup
+settings = initialize_settings()
 
 # Create FastAPI app
 app = FastAPI(
