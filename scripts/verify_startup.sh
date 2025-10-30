@@ -91,13 +91,19 @@ else
 fi
 
 # Check GROBID health (may take time to start)
-info "Checking GROBID health..."
-if docker exec citrature-grobid curl -f http://localhost:8070/api/isalive > /dev/null 2>&1; then
-    success "GROBID is healthy"
-else
-    warning "GROBID may still be starting up (this is normal on first run)"
-fi
-
+info "Checking GROBID health (this may take up to 60 seconds)..."
+MAX_ATTEMPTS=20
+ATTEMPT=1
+until docker exec citrature-grobid curl -f http://localhost:8070/api/isalive > /dev/null 2>&1; do
+    if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+        error "GROBID health check failed after waiting for startup"
+        exit 1
+    fi
+    warning "GROBID is still starting up (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
+    ATTEMPT=$((ATTEMPT+1))
+    sleep 3
+done
+success "GROBID is healthy"
 # Check API health
 info "Checking API health..."
 if docker exec citrature-api curl -f http://localhost:8000/health > /dev/null 2>&1; then
