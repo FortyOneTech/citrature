@@ -1,120 +1,22 @@
 # Git
 .git
 .gitignore
+.gitattributes
 
 # Documentation
-README.md
-GOOGLE_OAUTH_SETUP.md
 *.md
+*.pdf
+docs/
 
-# Environment files
-.env
-.env.example
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-frontend/.env
-frontend/.env.example
-frontend/.env.local
-frontend/.env.development.local
-frontend/.env.test.local
-frontend/.env.production.local
-
-# Google Cloud credentials
-credentials.json
-credentials.json.template
-client_secret_*.json
-service-account-*.json
-
-# Development files
-Makefile
-docker-compose.yml
-docker-compose.override.yml
-docker-compose.*.yml
-
-# IDE and editor files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Temporary files
-*.tmp
-*.temp
-temp/
-tmp/
-
-# Test files
-test/
-tests/
-*_test.py
-test_*.py
-
-# Coverage reports
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
-*.cover
-.hypothesis/
-.pytest_cache/
-
-# Node.js (for frontend)
-frontend/node_modules/
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-frontend/.npm
-frontend/.yarn-integrity
-
-# React build artifacts
-frontend/build/
-frontend/dist/
-
-# Search indexes
-bm25_index/
-whoosh_index/
-
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# Python cache
-__pycache__/
+# Python
+__pycache__
 *.py[cod]
 *$py.class
 *.so
-
-# Virtual environments
-.env
-.venv
+.Python
 env/
 venv/
 ENV/
-env.bak/
-venv.bak/
-
-# Python build artifacts
 build/
 develop-eggs/
 dist/
@@ -130,43 +32,57 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-MANIFEST
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# Environment
+.env
+.env.*
+!.env.example
 
-# pyenv
-.python-version
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# pipenv
-Pipfile.lock
+# OS
+.DS_Store
+Thumbs.db
 
-# PEP 582
-__pypackages__/
+# Node modules (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# SageMath parsed files
-*.sage.py
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+.coverage
+.pytest_cache/
 .mypy_cache/
-.dmypy.json
-dmypy.json
+.tox/
 
-# Pyre type checker
-.pyre/
+# Celery
+celerybeat-schedule
+celerybeat.pid
 
-# pytype static type analyzer
-.pytype/
+# Docker
+docker-compose.override.yml
 
-# Cython debug symbols
-cython_debug/
+# Credentials
+credentials.json
+client_secret*.json
+
+# Logs
+*.log
+
+# Frontend build
+frontend/build/
+frontend/dist/
+
+# Test files
+tests/
+test_*.py
+*_test.py

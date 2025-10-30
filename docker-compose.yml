@@ -1,9 +1,19 @@
 version: '3.8'
 
+networks:
+  citrature-network:
+    driver: bridge
+    name: citrature-network
+
 services:
-  # Database
+  # ================================
+  # Database Service - PostgreSQL with pgvector
+  # ================================
   db:
     image: pgvector/pgvector:pg16
+    container_name: citrature-db
+    networks:
+      - citrature-network
     environment:
       POSTGRES_DB: citrature
       POSTGRES_USER: citrature
@@ -11,16 +21,23 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U citrature -d citrature"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
-  # Redis
+  # ================================
+  # Redis Service - Result Backend
+  # ================================
   redis:
     image: redis:7-alpine
+    container_name: citrature-redis
+    networks:
+      - citrature-network
     ports:
       - "6379:6379"
     volumes:
@@ -30,16 +47,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 5s
+    restart: unless-stopped
 
-  # RabbitMQ
+  # ================================
+  # RabbitMQ Service - Message Broker
+  # ================================
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    container_name: citrature-rabbitmq
+    networks:
+      - citrature-network
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     ports:
       - "5672:5672"
-      - "15672:15672"  # Management UI
+      - "15672:15672"
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -47,11 +71,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 15s
+    restart: unless-stopped
 
-  # GROBID
+  # ================================
+  # GROBID Service - PDF Processing
+  # ================================
   grobid:
     image: lfoppiano/grobid:0.8.0
+    container_name: citrature-grobid
     platform: linux/amd64
+    networks:
+      - citrature-network
     ports:
       - "8070:8070"
     environment:
@@ -64,33 +95,53 @@ services:
       timeout: 30s
       retries: 10
       start_period: 300s
+    restart: unless-stopped
 
-  # API
+  # ================================
+  # API Service - FastAPI Application
+  # ================================
   api:
-    build: .
-    command: sh -c "alembic upgrade head && uvicorn citrature.main:app --host 0.0.0.0 --port 8000 --reload"
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: citrature-api
+    networks:
+      - citrature-network
+    command: sh -c "cd /app/shared && alembic upgrade head && cd /app/services/api && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://citrature:password@db:5432/citrature
+      - API_ORIGIN=${API_ORIGIN:-http://localhost:8000}
+      - WEB_ORIGIN=${WEB_ORIGIN:-http://localhost:3000}
+      - POSTGRES_DSN=postgresql://citrature:password@db:5432/citrature
+      - PGVECTOR_DIMENSION=${PGVECTOR_DIMENSION:-768}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379/0
-      - GROBID_BASE_URL=http://grobid:8070
-      - GOOGLE_REDIRECT_URI=http://localhost:8000/auth/google/callback
-      - GCS_CREDENTIAL_PATH=/app/credentials.json
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - CROSSREF_BASE_URL=${CROSSREF_BASE_URL:-https://api.crossref.org}
+      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - GROBID_BASE_URL=http://grobid:8070
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
       - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_JSON=${GCS_CREDENTIALS_JSON}
+      - MAX_TOPIC_PAPERS=${MAX_TOPIC_PAPERS:-30}
+      - MAX_GRAPH_DEPTH=${MAX_GRAPH_DEPTH:-3}
+      - MAX_COLLECTIONS_PER_USER=${MAX_COLLECTIONS_PER_USER:-1}
+      - MONTHLY_CHAT_QUOTA=${MONTHLY_CHAT_QUOTA:-100}
+      - MAX_UPLOAD_SIZE_MB=${MAX_UPLOAD_SIZE_MB:-50}
       - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     env_file:
       - .env
     volumes:
-      - .:/app
-      - ./credentials.json:/app/credentials.json:ro
-      - bm25_index:/app/bm25_index
+      - ./shared:/app/shared
+      - ./services/api:/app/services/api
+      - bm25_indices:/app/bm25_indices
     depends_on:
       db:
         condition: service_healthy
@@ -103,30 +154,51 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
-  # Celery Worker
+  # ================================
+  # Worker Service - Celery Worker
+  # ================================
   worker:
-    build: .
-    command: celery -A citrature.celery_app worker --loglevel=info
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    container_name: citrature-worker
+    networks:
+      - citrature-network
     environment:
-      - DATABASE_URL=postgresql://citrature:password@db:5432/citrature
+      - API_ORIGIN=${API_ORIGIN:-http://localhost:8000}
+      - WEB_ORIGIN=${WEB_ORIGIN:-http://localhost:3000}
+      - POSTGRES_DSN=postgresql://citrature:password@db:5432/citrature
+      - PGVECTOR_DIMENSION=${PGVECTOR_DIMENSION:-768}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - CROSSREF_BASE_URL=${CROSSREF_BASE_URL:-https://api.crossref.org}
+      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
       - GROBID_BASE_URL=http://grobid:8070
-      - GCS_CREDENTIAL_PATH=/app/credentials.json
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
       - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_JSON=${GCS_CREDENTIALS_JSON}
+      - MAX_TOPIC_PAPERS=${MAX_TOPIC_PAPERS:-30}
+      - MAX_GRAPH_DEPTH=${MAX_GRAPH_DEPTH:-3}
+      - MAX_COLLECTIONS_PER_USER=${MAX_COLLECTIONS_PER_USER:-1}
+      - MONTHLY_CHAT_QUOTA=${MONTHLY_CHAT_QUOTA:-100}
+      - MAX_UPLOAD_SIZE_MB=${MAX_UPLOAD_SIZE_MB:-50}
       - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     env_file:
       - .env
     volumes:
-      - .:/app
-      - ./credentials.json:/app/credentials.json:ro
-      - bm25_index:/app/bm25_index
+      - ./shared:/app/shared
+      - ./services/worker:/app/services/worker
+      - bm25_indices:/app/bm25_indices
     depends_on:
       db:
         condition: service_healthy
@@ -134,26 +206,49 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: unless-stopped
 
-  # Celery Beat (for periodic tasks)
+  # ================================
+  # Beat Service - Celery Beat Scheduler
+  # ================================
   beat:
-    build: .
-    command: celery -A citrature.celery_app beat --loglevel=info
+    build:
+      context: .
+      dockerfile: services/beat/Dockerfile
+    container_name: citrature-beat
+    networks:
+      - citrature-network
     environment:
-      - DATABASE_URL=postgresql://citrature:password@db:5432/citrature
+      - API_ORIGIN=${API_ORIGIN:-http://localhost:8000}
+      - WEB_ORIGIN=${WEB_ORIGIN:-http://localhost:3000}
+      - POSTGRES_DSN=postgresql://citrature:password@db:5432/citrature
+      - PGVECTOR_DIMENSION=${PGVECTOR_DIMENSION:-768}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
       - REDIS_URL=redis://redis:6379/0
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - CROSSREF_BASE_URL=${CROSSREF_BASE_URL:-https://api.crossref.org}
+      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - CROSSREF_MAILTO=${CROSSREF_MAILTO}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - GROBID_BASE_URL=http://grobid:8070
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
       - GCS_PROJECT_ID=${GCS_PROJECT_ID}
+      - GCS_CREDENTIALS_JSON=${GCS_CREDENTIALS_JSON}
+      - MAX_TOPIC_PAPERS=${MAX_TOPIC_PAPERS:-30}
+      - MAX_GRAPH_DEPTH=${MAX_GRAPH_DEPTH:-3}
+      - MAX_COLLECTIONS_PER_USER=${MAX_COLLECTIONS_PER_USER:-1}
+      - MONTHLY_CHAT_QUOTA=${MONTHLY_CHAT_QUOTA:-100}
+      - MAX_UPLOAD_SIZE_MB=${MAX_UPLOAD_SIZE_MB:-50}
       - SECRET_KEY=${SECRET_KEY}
+      - ALGORITHM=${ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
     env_file:
       - .env
     volumes:
-      - .:/app
+      - ./shared:/app/shared
+      - ./services/beat:/app/services/beat
     depends_on:
       db:
         condition: service_healthy
@@ -161,14 +256,22 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    restart: unless-stopped
 
-  # Frontend (React)
+  # ================================
+  # Frontend Service - React Application
+  # ================================
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: citrature-frontend
+    networks:
+      - citrature-network
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=${API_ORIGIN:-http://localhost:8000}
       - REACT_APP_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
     volumes:
       - ./frontend:/app
@@ -176,10 +279,16 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
+  pgdata:
+    name: citrature-pgdata
+  bm25_indices:
+    name: citrature-bm25-indices
   redis_data:
+    name: citrature-redis-data
   rabbitmq_data:
+    name: citrature-rabbitmq-data
   grobid_data:
-  bm25_index:
+    name: citrature-grobid-data
