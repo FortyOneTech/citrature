@@ -38,14 +38,7 @@ target_metadata = Base.metadata
 def get_url():
     """Get database URL from settings."""
     settings = get_settings()
-    # Use POSTGRES_DSN from environment, with fallback to DATABASE_URL for compatibility
-    url = getattr(settings, 'database_url_sync', None)
-    if url is None:
-        # Fallback for legacy DATABASE_URL
-        import os
-        db_url = os.getenv('POSTGRES_DSN', os.getenv('DATABASE_URL', 'postgresql://citrature:password@db:5432/citrature'))
-        url = db_url.replace("postgresql://", "postgresql+psycopg2://")
-    return url
+    return settings.database_url_sync
 
 
 def run_migrations_offline() -> None:
